@@ -13,10 +13,15 @@ export type Scenario = {
   brushVerticalSpeed: number;
   brushLateralSpeed: number;
   contactHeight?: number;
+  receiverSpeed?: number;
+  receiverTiltDeg?: number;
+  receiverYawDeg?: number;
+  receiverBrushVerticalSpeed?: number;
+  receiverBrushLateralSpeed?: number;
 };
 export type ContactResult = { state: State; normalImpulse: number; tangentialImpulse: number; mode: 'grip' | 'slip'; normal: Vec3 };
 export type Sample = { t: number; state: State };
-export type Flight = { samples: Sample[]; firstBounce: Vec3 | null; bounces: Vec3[] };
+export type Flight = { samples: Sample[]; firstBounce: Vec3 | null; bounces: Vec3[]; receiverHit: Vec3 | null };
 
 export const BALL = { mass: 0.0027, radius: 0.02 } as const;
 export const TABLE = { length: 2.74, width: 1.525, netHeight: 0.1525 } as const;
@@ -68,6 +73,30 @@ export function serveContact(s: Scenario, material: Material = HURRICANE_3_NEO_4
   return { state, normalImpulse, tangentialImpulse: Math.hypot(s.brushVerticalSpeed, s.brushLateralSpeed) * BALL.mass, mode: Math.abs(s.brushVerticalSpeed) + Math.abs(s.brushLateralSpeed) > 2 ? 'slip' : 'grip', normal: racketNormal(s.faceTiltDeg, s.faceYawDeg) };
 }
 
+export function receiverContact(before: State, s: Scenario, material: Material = HURRICANE_3_NEO_40): ContactResult {
+  const tilt = s.receiverTiltDeg ?? 6;
+  const yaw = s.receiverYawDeg ?? 0;
+  const n = racketNormal(tilt, yaw);
+  const r = scale(n, -BALL.radius);
+  const racketVelocity: Vec3 = [-(s.receiverSpeed ?? 1.2), s.receiverBrushLateralSpeed ?? 0, s.receiverBrushVerticalSpeed ?? 0];
+  const relative = sub(add(before.velocity, cross(before.spin, r)), racketVelocity);
+  const normalSpeed = dot(relative, n);
+  const jn = Math.max(0, -(1 + material.restitution) * normalSpeed * BALL.mass);
+  const tangent = sub(relative, scale(n, normalSpeed));
+  const inverseMass = 1 / BALL.mass + BALL.radius ** 2 / inertia;
+  const gripImpulse = scale(tangent, -1 / inverseMass);
+  const grip = norm(gripImpulse) <= material.staticFriction * jn;
+  const jt = grip ? gripImpulse : scale(unit(tangent), -material.kineticFriction * jn);
+  const impulse = add(scale(n, jn), jt);
+  return {
+    state: { position: before.position, velocity: add(before.velocity, scale(impulse, 1 / BALL.mass)), spin: add(before.spin, scale(cross(r, jt), 1 / inertia)) },
+    normalImpulse: jn,
+    tangentialImpulse: norm(jt),
+    mode: grip ? 'grip' : 'slip',
+    normal: n,
+  };
+}
+
 export function impact(s: Scenario, material: Material = HURRICANE_3_NEO_40): ContactResult {
   const before = incomingState(s);
   const n = racketNormal(s.faceTiltDeg, s.faceYawDeg);
@@ -110,11 +139,13 @@ export function acceleration(state: State): Vec3 {
   return add([0, 0, -9.81], add(drag, magnus));
 }
 
-export function simulateFlight(start: State, duration = 1.2, dt = 0.002): Flight {
+export function simulateFlight(start: State, duration = 1.2, dt = 0.002, receiver?: Scenario): Flight {
   const samples: Sample[] = [{ t: 0, state: start }];
   let state = start;
   let firstBounce: Vec3 | null = null;
   const bounces: Vec3[] = [];
+  let receiverHit: Vec3 | null = null;
+  let receiverApplied = false;
   for (let i = 1; i <= Math.round(duration / dt); i++) {
     // Midpoint integration is stable enough for the initial visual PoC.
     const a0 = acceleration(state);
@@ -128,6 +159,16 @@ export function simulateFlight(start: State, duration = 1.2, dt = 0.002): Flight
       velocity: add(state.velocity, scale(acceleration(mid), dt)),
       spin: state.spin,
     };
+    if (!receiverApplied && receiver && state.position[0] < 1.05 && next.position[0] >= 1.05 && next.position[2] > 0.18 && next.position[2] < 0.95) {
+      const fraction = (1.05 - state.position[0]) / (next.position[0] - state.position[0]);
+      receiverHit = add(state.position, scale(sub(next.position, state.position), fraction));
+      const hitState: State = { ...next, position: receiverHit };
+      const response = receiverContact(hitState, receiver);
+      samples.push({ t: (i - 1 + fraction) * dt, state: response.state });
+      state = response.state;
+      receiverApplied = true;
+      continue;
+    }
     if (state.position[2] > BALL.radius && next.position[2] <= BALL.radius) {
       const fraction = (state.position[2] - BALL.radius) / (state.position[2] - next.position[2]);
       firstBounce = add(state.position, scale(sub(next.position, state.position), fraction));
@@ -141,5 +182,5 @@ export function simulateFlight(start: State, duration = 1.2, dt = 0.002): Flight
     samples.push({ t: i * dt, state: next });
     state = next;
   }
-  return { samples, firstBounce, bounces };
+  return { samples, firstBounce, bounces, receiverHit };
 }

@@ -14,6 +14,11 @@ const initial: Scenario = {
   brushVerticalSpeed: 1.2,
   brushLateralSpeed: 0,
   contactHeight: 0.65,
+  receiverSpeed: 1.5,
+  receiverTiltDeg: 8,
+  receiverYawDeg: 0,
+  receiverBrushVerticalSpeed: 0.4,
+  receiverBrushLateralSpeed: 0,
 };
 const scenario = { ...initial };
 
@@ -31,6 +36,7 @@ app.innerHTML = `
     <aside class="controls"><div class="controls-intro"><span class="eyebrow">PARÂMETROS DO SAQUE</span><h2>Configure a jogada</h2><p>O contato começa no lado do servidor. Valores positivos de giro vertical representam topspin.</p></div>
       <div class="control-group"><h3>01 · Lançamento e giro</h3><div id="ball-controls"></div></div>
       <div class="control-group"><h3>02 · Contato da raquete</h3><div id="racket-controls"></div></div>
+      <div class="control-group"><h3>03 · Raquete da recepção</h3><div id="receiver-controls"></div></div>
       <div class="material"><span class="material-kicker">BORRACHA · AMBOS OS LADOS</span><strong>Hurricane 3 Neo Provincial</strong><span>Blue Sponge · 40°</span><p>Os coeficientes de contato atuais são ilustrativos. A borracha está identificada no modelo para futura calibração experimental.</p></div>
     </aside>
   </main>
@@ -51,6 +57,13 @@ const racketControls: Control[] = [
   { key: 'brushVerticalSpeed', label: 'Escovada vertical', min: -6, max: 6, step: 0.1, unit: 'm/s' },
   { key: 'brushLateralSpeed', label: 'Escovada lateral', min: -6, max: 6, step: 0.1, unit: 'm/s' },
 ];
+const receiverControls: Control[] = [
+  { key: 'receiverSpeed', label: 'Velocidade do movimento', min: 0, max: 6, step: 0.1, unit: 'm/s' },
+  { key: 'receiverTiltDeg', label: 'Inclinação da face', min: -45, max: 45, step: 1, unit: '°' },
+  { key: 'receiverYawDeg', label: 'Ângulo lateral', min: -45, max: 45, step: 1, unit: '°' },
+  { key: 'receiverBrushVerticalSpeed', label: 'Escovada vertical', min: -6, max: 6, step: 0.1, unit: 'm/s' },
+  { key: 'receiverBrushLateralSpeed', label: 'Escovada lateral', min: -6, max: 6, step: 0.1, unit: 'm/s' },
+];
 function addControls(hostId: string, controls: Control[]) {
   const host = document.querySelector<HTMLDivElement>(`#${hostId}`)!;
   for (const c of controls) {
@@ -67,6 +80,7 @@ function addControls(hostId: string, controls: Control[]) {
 }
 addControls('ball-controls', ballControls);
 addControls('racket-controls', racketControls);
+addControls('receiver-controls', receiverControls);
 
 const stage = document.querySelector<HTMLDivElement>('#stage')!;
 const scene = new THREE.Scene();
@@ -111,6 +125,8 @@ const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL.radius, 24, 16), new T
 scene.add(ball);
 const racket = new THREE.Mesh(new THREE.CircleGeometry(0.115, 48), new THREE.MeshStandardMaterial({ color: '#e95f55', roughness: 0.9, side: THREE.DoubleSide }));
 scene.add(racket);
+const receiverRacket = new THREE.Mesh(new THREE.CircleGeometry(0.115, 48), new THREE.MeshStandardMaterial({ color: '#6d9cff', roughness: 0.9, side: THREE.DoubleSide }));
+scene.add(receiverRacket);
 const bounce = new THREE.Mesh(new THREE.RingGeometry(0.027, 0.038, 32), new THREE.MeshBasicMaterial({ color: '#ffd577', side: THREE.DoubleSide }));
 bounce.position.z = 0.004;
 scene.add(bounce);
@@ -118,6 +134,13 @@ const grid = new THREE.GridHelper(5, 20, 0x24445b, 0x24445b);
 grid.rotation.x = Math.PI / 2;
 grid.position.z = -0.07;
 scene.add(grid);
+const postGeometry = new THREE.CylinderGeometry(0.012, 0.012, TABLE.netHeight + 0.05, 12);
+const postMaterial = new THREE.MeshStandardMaterial({ color: '#d4e7e8', roughness: 0.7 });
+for (const y of [-TABLE.width / 2 - 0.03, TABLE.width / 2 + 0.03]) {
+  const post = new THREE.Mesh(postGeometry, postMaterial);
+  post.position.set(0, y, (TABLE.netHeight + 0.05) / 2);
+  scene.add(post);
+}
 
 let outgoingPath: THREE.Line | null = null;
 let incomingPath: THREE.Line | null = null;
@@ -143,7 +166,7 @@ function updateSimulation() {
   playButton.textContent = '▶ Reproduzir';
   try {
     const result = serveContact(scenario);
-    const flight = simulateFlight(result.state);
+    const flight = simulateFlight(result.state, 1.6, 0.002, scenario);
     samples = flight.samples;
     if (outgoingPath) scene.remove(outgoingPath);
     if (incomingPath) scene.remove(incomingPath);
@@ -153,6 +176,8 @@ function updateSimulation() {
     incomingPath = line([[incomingStart.x, incomingStart.y, incomingStart.z], [contactPoint.x, contactPoint.y, contactPoint.z]], new THREE.LineBasicMaterial({ color: '#ffa578' }));
     racket.position.copy(contactPoint);
     racket.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...result.normal));
+    receiverRacket.position.set(1.12, 0, 0.48);
+    receiverRacket.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...[-Math.cos((scenario.receiverTiltDeg ?? 8) * Math.PI / 180), -Math.sin((scenario.receiverYawDeg ?? 0) * Math.PI / 180), Math.sin((scenario.receiverTiltDeg ?? 8) * Math.PI / 180)] as Vec3));
     bounce.visible = flight.bounces.length > 0;
     if (flight.bounces[0]) bounce.position.set(flight.bounces[0][0], flight.bounces[0][1], 0.004);
     document.querySelector('#speed-out')!.textContent = Math.hypot(...result.state.velocity).toFixed(1);
@@ -162,7 +187,7 @@ function updateSimulation() {
     const p = flight.bounces[0];
     const q = flight.bounces[1];
     const onTable = (point: Vec3 | undefined) => !!point && Math.abs(point[0]) <= TABLE.length / 2 && Math.abs(point[1]) <= TABLE.width / 2;
-    notice.textContent = p ? `Quinques: ${onTable(p) ? 'servidor' : 'fora da mesa'}${q ? ` → ${onTable(q) ? 'recebedor' : 'fora da mesa'}` : ''} · primeiro toque x ${p[0].toFixed(2)} m. Coeficientes aerodinâmicos e de contato ainda não calibrados.` : 'O saque não tocou a mesa no intervalo simulado.';
+    notice.textContent = p ? `Quinques: ${onTable(p) ? 'servidor' : 'fora da mesa'}${flight.receiverHit ? ' → contato da recepção' : ''}${q ? ` → ${onTable(q) ? 'retorno na mesa' : 'fora da mesa'}` : ''} · primeiro toque x ${p[0].toFixed(2)} m. Coeficientes aerodinâmicos e de contato ainda não calibrados.` : 'O saque não tocou a mesa no intervalo simulado.';
     notice.classList.remove('error');
     setPlayback(0);
   } catch (error) {
@@ -181,10 +206,11 @@ playButton.addEventListener('click', () => {
 timeSlider.addEventListener('input', () => { playing = false; playButton.textContent = '▶ Reproduzir'; setPlayback(Number(timeSlider.value) / 1000 * (samples.at(-1)?.t ?? 0)); });
 document.querySelector('#reset')!.addEventListener('click', () => {
   Object.assign(scenario, initial);
-  for (const c of [...ballControls, ...racketControls]) {
-    const group = ballControls.includes(c) ? '#ball-controls' : '#racket-controls';
+  for (const c of [...ballControls, ...racketControls, ...receiverControls]) {
+    const group = ballControls.includes(c) ? '#ball-controls' : racketControls.includes(c) ? '#racket-controls' : '#receiver-controls';
+    const controls = ballControls.includes(c) ? ballControls : racketControls.includes(c) ? racketControls : receiverControls;
     const rows = [...document.querySelectorAll(`${group} .control`)];
-    const row = rows[[...(ballControls.includes(c) ? ballControls : racketControls)].indexOf(c)];
+    const row = rows[controls.indexOf(c)];
     const slider = row.querySelector('input')!;
     slider.value = String(scenario[c.key]);
     row.querySelector('output')!.textContent = `${Number(slider.value).toLocaleString('pt-BR')} ${c.unit}`;
