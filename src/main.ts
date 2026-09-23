@@ -127,9 +127,13 @@ const racket = new THREE.Mesh(new THREE.CircleGeometry(0.115, 48), new THREE.Mes
 scene.add(racket);
 const receiverRacket = new THREE.Mesh(new THREE.CircleGeometry(0.115, 48), new THREE.MeshStandardMaterial({ color: '#6d9cff', roughness: 0.9, side: THREE.DoubleSide }));
 scene.add(receiverRacket);
-const bounce = new THREE.Mesh(new THREE.RingGeometry(0.027, 0.038, 32), new THREE.MeshBasicMaterial({ color: '#ffd577', side: THREE.DoubleSide }));
-bounce.position.z = 0.004;
-scene.add(bounce);
+const bounceMarkers = [0, 1, 2].map((index) => {
+  const marker = new THREE.Mesh(new THREE.RingGeometry(0.027 + index * 0.008, 0.038 + index * 0.008, 32), new THREE.MeshBasicMaterial({ color: index === 0 ? '#ffd577' : '#f5a86c', side: THREE.DoubleSide }));
+  marker.position.z = 0.004;
+  marker.visible = false;
+  scene.add(marker);
+  return marker;
+});
 const grid = new THREE.GridHelper(5, 20, 0x24445b, 0x24445b);
 grid.rotation.x = Math.PI / 2;
 grid.position.z = -0.07;
@@ -178,16 +182,18 @@ function updateSimulation() {
     racket.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...result.normal));
     receiverRacket.position.set(1.12, 0, 0.48);
     receiverRacket.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...[-Math.cos((scenario.receiverTiltDeg ?? 8) * Math.PI / 180), -Math.sin((scenario.receiverYawDeg ?? 0) * Math.PI / 180), Math.sin((scenario.receiverTiltDeg ?? 8) * Math.PI / 180)] as Vec3));
-    bounce.visible = flight.bounces.length > 0;
-    if (flight.bounces[0]) bounce.position.set(flight.bounces[0][0], flight.bounces[0][1], 0.004);
+    bounceMarkers.forEach((marker, index) => {
+      const point = flight.bounces[index];
+      marker.visible = !!point;
+      if (point) marker.position.set(point[0], point[1], 0.004);
+    });
     document.querySelector('#speed-out')!.textContent = Math.hypot(...result.state.velocity).toFixed(1);
     document.querySelector('#top-out')!.textContent = Math.round(result.state.spin[1] * 30 / Math.PI).toLocaleString('pt-BR');
     document.querySelector('#side-out')!.textContent = Math.round(result.state.spin[2] * 30 / Math.PI).toLocaleString('pt-BR');
     document.querySelector('#contact-mode')!.textContent = result.mode === 'grip' ? 'Aderência' : 'Deslizamento';
-    const p = flight.bounces[0];
-    const q = flight.bounces[1];
     const onTable = (point: Vec3 | undefined) => !!point && Math.abs(point[0]) <= TABLE.length / 2 && Math.abs(point[1]) <= TABLE.width / 2;
-    notice.textContent = p ? `Quinques: ${onTable(p) ? 'servidor' : 'fora da mesa'}${flight.receiverHit ? ' → contato da recepção' : ''}${q ? ` → ${onTable(q) ? 'retorno na mesa' : 'fora da mesa'}` : ''} · primeiro toque x ${p[0].toFixed(2)} m. Coeficientes aerodinâmicos e de contato ainda não calibrados.` : 'O saque não tocou a mesa no intervalo simulado.';
+    const bounceSummary = flight.bounces.map((point, index) => `${index + 1}: ${onTable(point) ? 'mesa' : 'fora'}`).join(' · ');
+    notice.textContent = flight.bounces[0] ? `Quiques — ${bounceSummary}${flight.receiverHit ? ' · contato da recepção' : ''}. Coeficientes aerodinâmicos e de contato ainda não calibrados.` : 'O saque não tocou a mesa no intervalo simulado.';
     notice.classList.remove('error');
     setPlayback(0);
   } catch (error) {

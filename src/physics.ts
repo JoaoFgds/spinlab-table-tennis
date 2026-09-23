@@ -176,7 +176,7 @@ export function simulateFlight(start: State, duration = 1.2, dt = 0.002, receive
       const bounceState: State = { position: firstBounce, velocity: [next.velocity[0], next.velocity[1], Math.abs(next.velocity[2]) * 0.88], spin: scale(next.spin, 0.92) };
       samples.push({ t: (i - 1 + fraction) * dt, state: bounceState });
       state = bounceState;
-      if (bounces.length >= 2) break;
+      if (bounces.length >= 3) break;
       continue;
     }
     samples.push({ t: i * dt, state: next });
