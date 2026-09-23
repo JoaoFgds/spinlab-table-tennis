@@ -1,6 +1,6 @@
 # SpinLab Table Tennis
 
-PoC interativa para estudar a resposta de uma bola de tênis de mesa ao impacto com uma raquete e a trajetória resultante. A configuração inicial identifica **Hurricane 3 Neo Provincial Blue Sponge 40°** nos dois lados do contato.
+PoC interativa focada no movimento inicial do saque: contato com a raquete, primeiro quique no lado do servidor e segundo quique no lado do recebedor. A configuração inicial identifica **Hurricane 3 Neo Provincial Blue Sponge 40°** nos dois lados do contato.
 
 ## Executar
 
@@ -17,6 +17,6 @@ Para validar a compilação: `npm run build`.
 - Impacto impulsivo com restituição normal e atrito estático/cinético. A raquete tem movimento prescrito e não recua.
 - Voo com gravidade, arrasto quadrático e força Magnus; integração por ponto médio e detecção do primeiro cruzamento do plano da mesa.
 - Os coeficientes de contato da Hurricane 3 Neo e os coeficientes aerodinâmicos **ainda não foram medidos**. Os valores atuais são ilustrativos. A saída não deve ser interpretada como previsão quantitativa validada para essa borracha.
-- O cenário começa no instante de recepção. O segmento de trajetória de entrada é uma representação da velocidade incidente; o saque e o quique anterior ainda não são simulados.
+- O cenário começa no instante do contato do saque, no lado do servidor. A simulação detecta até dois quiques e marca a chegada ao lado do recebedor.
 
 O módulo `src/physics.ts` não depende do renderizador. A próxima etapa física é medir saídas para diferentes velocidades, giros e ângulos, ajustar os parâmetros e verificar erros em ensaios separados dos de calibração.

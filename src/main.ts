@@ -1,18 +1,19 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { BALL, HURRICANE_3_NEO_40, TABLE, impact, incomingState, simulateFlight, type Scenario, type Vec3 } from './physics';
+import { BALL, HURRICANE_3_NEO_40, TABLE, serveContact, simulateFlight, type Scenario, type Vec3 } from './physics';
 import './style.css';
 
 const initial: Scenario = {
-  incomingSpeed: 5,
+  incomingSpeed: 4.8,
   incomingVerticalSpeed: -0.3,
-  topSpinRpm: 1800,
+  topSpinRpm: 900,
   sideSpinRpm: 0,
-  faceTiltDeg: 8,
+  faceTiltDeg: -5,
   faceYawDeg: 0,
-  racketSpeed: 0.3,
-  brushVerticalSpeed: 0,
+  racketSpeed: 2.2,
+  brushVerticalSpeed: 1.2,
   brushLateralSpeed: 0,
+  contactHeight: 0.65,
 };
 const scenario = { ...initial };
 
@@ -21,15 +22,15 @@ app.innerHTML = `
   <header class="topbar"><div class="brand"><span class="brand-mark">◉</span><span>SPIN<span class="brand-light">LAB</span></span></div><span class="top-note">LABORATÓRIO DE RECEPÇÃO · PoC 0.1</span></header>
   <main class="layout">
     <section class="stage-panel">
-      <div class="stage-head"><div><span class="eyebrow">SIMULAÇÃO INTERATIVA</span><h1>O giro encontra a raquete.</h1><p>Explore como o ângulo da face e a velocidade do movimento mudam a devolução.</p></div><button id="reset" class="secondary">Restaurar cenário</button></div>
-      <div class="stage" id="stage"><div class="scene-hint">Arraste para girar · role para ampliar</div><div class="legend"><span><i class="dot incoming"></i> Bola recebida</span><span><i class="dot outgoing"></i> Devolução</span><span><i class="dot impact"></i> Primeiro quique</span></div></div>
+      <div class="stage-head"><div><span class="eyebrow">SIMULAÇÃO INTERATIVA</span><h1>Construa o saque.</h1><p>Observe o contato, o primeiro quique e a chegada da bola ao lado do recebedor.</p></div><button id="reset" class="secondary">Restaurar cenário</button></div>
+      <div class="stage" id="stage"><div class="scene-hint">Arraste para girar · role para ampliar</div><div class="legend"><span><i class="dot incoming"></i> Lançamento</span><span><i class="dot outgoing"></i> Trajetória do saque</span><span><i class="dot impact"></i> Quiques</span></div></div>
       <div class="playback"><button id="play" class="primary">▶ Reproduzir</button><input id="time" aria-label="Tempo da animação" type="range" min="0" max="1000" value="0"/><span id="time-value">0,00 s</span></div>
       <div class="metrics"><div><span>SAÍDA</span><strong id="speed-out">—</strong><small>m/s</small></div><div><span>GIRO VERTICAL</span><strong id="top-out">—</strong><small>RPM</small></div><div><span>GIRO LATERAL</span><strong id="side-out">—</strong><small>RPM</small></div><div><span>CONTATO</span><strong id="contact-mode">—</strong><small>modelo de impulso</small></div></div>
       <div id="notice" class="notice"></div>
     </section>
-    <aside class="controls"><div class="controls-intro"><span class="eyebrow">PARÂMETROS</span><h2>Configure a jogada</h2><p>Valores positivos de giro vertical representam topspin neste sistema de coordenadas.</p></div>
-      <div class="control-group"><h3>01 · Bola recebida</h3><div id="ball-controls"></div></div>
-      <div class="control-group"><h3>02 · Movimento da raquete</h3><div id="racket-controls"></div></div>
+    <aside class="controls"><div class="controls-intro"><span class="eyebrow">PARÂMETROS DO SAQUE</span><h2>Configure a jogada</h2><p>O contato começa no lado do servidor. Valores positivos de giro vertical representam topspin.</p></div>
+      <div class="control-group"><h3>01 · Lançamento e giro</h3><div id="ball-controls"></div></div>
+      <div class="control-group"><h3>02 · Contato da raquete</h3><div id="racket-controls"></div></div>
       <div class="material"><span class="material-kicker">BORRACHA · AMBOS OS LADOS</span><strong>Hurricane 3 Neo Provincial</strong><span>Blue Sponge · 40°</span><p>Os coeficientes de contato atuais são ilustrativos. A borracha está identificada no modelo para futura calibração experimental.</p></div>
     </aside>
   </main>
@@ -37,15 +38,16 @@ app.innerHTML = `
 
 type Control = { key: keyof Scenario; label: string; min: number; max: number; step: number; unit: string };
 const ballControls: Control[] = [
-  { key: 'incomingSpeed', label: 'Velocidade da bola', min: 1, max: 12, step: 0.1, unit: 'm/s' },
+  { key: 'incomingSpeed', label: 'Velocidade após contato', min: 1, max: 12, step: 0.1, unit: 'm/s' },
   { key: 'incomingVerticalSpeed', label: 'Componente vertical', min: -3, max: 3, step: 0.1, unit: 'm/s' },
   { key: 'topSpinRpm', label: 'Topspin ↔ backspin', min: -5000, max: 5000, step: 50, unit: 'RPM' },
   { key: 'sideSpinRpm', label: 'Sidespin', min: -5000, max: 5000, step: 50, unit: 'RPM' },
 ];
 const racketControls: Control[] = [
+  { key: 'contactHeight', label: 'Altura de contato', min: 0.4, max: 1.4, step: 0.01, unit: 'm' },
   { key: 'faceTiltDeg', label: 'Inclinação da face', min: -45, max: 45, step: 1, unit: '°' },
   { key: 'faceYawDeg', label: 'Ângulo lateral', min: -45, max: 45, step: 1, unit: '°' },
-  { key: 'racketSpeed', label: 'Velocidade para a bola', min: -2, max: 6, step: 0.1, unit: 'm/s' },
+  { key: 'racketSpeed', label: 'Velocidade do golpe', min: 0, max: 8, step: 0.1, unit: 'm/s' },
   { key: 'brushVerticalSpeed', label: 'Escovada vertical', min: -6, max: 6, step: 0.1, unit: 'm/s' },
   { key: 'brushLateralSpeed', label: 'Escovada lateral', min: -6, max: 6, step: 0.1, unit: 'm/s' },
 ];
@@ -140,28 +142,27 @@ function updateSimulation() {
   playing = false;
   playButton.textContent = '▶ Reproduzir';
   try {
-    const result = impact(scenario);
+    const result = serveContact(scenario);
     const flight = simulateFlight(result.state);
     samples = flight.samples;
     if (outgoingPath) scene.remove(outgoingPath);
     if (incomingPath) scene.remove(incomingPath);
     outgoingPath = line(samples.map(s => s.state.position), new THREE.LineBasicMaterial({ color: '#56dfcf' }));
-    const before = incomingState(scenario);
-    const incomingDirection = new THREE.Vector3(...before.velocity).normalize();
-    const incomingStart = new THREE.Vector3(...before.position).addScaledVector(incomingDirection, -0.55);
-    incomingPath = line([[incomingStart.x, incomingStart.y, incomingStart.z], before.position], new THREE.LineBasicMaterial({ color: '#ffa578' }));
-    const contactPoint = new THREE.Vector3(...before.position).addScaledVector(new THREE.Vector3(...result.normal), -BALL.radius);
+    const contactPoint = new THREE.Vector3(...result.state.position);
+    const incomingStart = contactPoint.clone().add(new THREE.Vector3(-0.18, 0, 0.12));
+    incomingPath = line([[incomingStart.x, incomingStart.y, incomingStart.z], [contactPoint.x, contactPoint.y, contactPoint.z]], new THREE.LineBasicMaterial({ color: '#ffa578' }));
     racket.position.copy(contactPoint);
     racket.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...result.normal));
-    bounce.visible = !!flight.firstBounce;
-    if (flight.firstBounce) bounce.position.set(flight.firstBounce[0], flight.firstBounce[1], 0.004);
+    bounce.visible = flight.bounces.length > 0;
+    if (flight.bounces[0]) bounce.position.set(flight.bounces[0][0], flight.bounces[0][1], 0.004);
     document.querySelector('#speed-out')!.textContent = Math.hypot(...result.state.velocity).toFixed(1);
     document.querySelector('#top-out')!.textContent = Math.round(result.state.spin[1] * 30 / Math.PI).toLocaleString('pt-BR');
     document.querySelector('#side-out')!.textContent = Math.round(result.state.spin[2] * 30 / Math.PI).toLocaleString('pt-BR');
     document.querySelector('#contact-mode')!.textContent = result.mode === 'grip' ? 'Aderência' : 'Deslizamento';
-    const p = flight.firstBounce;
-    const onTable = p && Math.abs(p[0]) <= TABLE.length / 2 && Math.abs(p[1]) <= TABLE.width / 2;
-    notice.textContent = p ? `Primeiro toque: ${onTable ? 'na mesa' : 'fora da mesa'} · x ${p[0].toFixed(2)} m, y ${p[1].toFixed(2)} m. Coeficientes aerodinâmicos e de contato ainda não calibrados.` : 'A bola não tocou o plano da mesa no intervalo simulado.';
+    const p = flight.bounces[0];
+    const q = flight.bounces[1];
+    const onTable = (point: Vec3 | undefined) => !!point && Math.abs(point[0]) <= TABLE.length / 2 && Math.abs(point[1]) <= TABLE.width / 2;
+    notice.textContent = p ? `Quinques: ${onTable(p) ? 'servidor' : 'fora da mesa'}${q ? ` → ${onTable(q) ? 'recebedor' : 'fora da mesa'}` : ''} · primeiro toque x ${p[0].toFixed(2)} m. Coeficientes aerodinâmicos e de contato ainda não calibrados.` : 'O saque não tocou a mesa no intervalo simulado.';
     notice.classList.remove('error');
     setPlayback(0);
   } catch (error) {

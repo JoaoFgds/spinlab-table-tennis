@@ -12,10 +12,11 @@ export type Scenario = {
   racketSpeed: number;
   brushVerticalSpeed: number;
   brushLateralSpeed: number;
+  contactHeight?: number;
 };
 export type ContactResult = { state: State; normalImpulse: number; tangentialImpulse: number; mode: 'grip' | 'slip'; normal: Vec3 };
 export type Sample = { t: number; state: State };
-export type Flight = { samples: Sample[]; firstBounce: Vec3 | null };
+export type Flight = { samples: Sample[]; firstBounce: Vec3 | null; bounces: Vec3[] };
 
 export const BALL = { mass: 0.0027, radius: 0.02 } as const;
 export const TABLE = { length: 2.74, width: 1.525, netHeight: 0.1525 } as const;
@@ -50,6 +51,21 @@ export function incomingState(s: Scenario): State {
     velocity: [s.incomingSpeed, 0, s.incomingVerticalSpeed],
     spin: [0, rpmToRad(s.topSpinRpm), rpmToRad(s.sideSpinRpm)],
   };
+}
+
+/** Post-contact state for a serve. The contact is represented explicitly so the
+ * UI can study the first movement independently from the receiver response. */
+export function serveContact(s: Scenario, material: Material = HURRICANE_3_NEO_40): ContactResult {
+  const height = s.contactHeight ?? 0.65;
+  const angle = rad(s.faceTiltDeg);
+  const speed = Math.max(0.5, s.incomingSpeed);
+  const state: State = {
+    position: [-1.05, 0, height],
+    velocity: [speed * Math.cos(angle) + 0.35 * s.racketSpeed, 0.2 * s.brushLateralSpeed, speed * Math.sin(angle) + 0.16 * s.brushVerticalSpeed],
+    spin: [0, rpmToRad(s.topSpinRpm) + s.brushVerticalSpeed * 80, rpmToRad(s.sideSpinRpm) + s.brushLateralSpeed * 80],
+  };
+  const normalImpulse = BALL.mass * Math.max(0, s.racketSpeed);
+  return { state, normalImpulse, tangentialImpulse: Math.hypot(s.brushVerticalSpeed, s.brushLateralSpeed) * BALL.mass, mode: Math.abs(s.brushVerticalSpeed) + Math.abs(s.brushLateralSpeed) > 2 ? 'slip' : 'grip', normal: racketNormal(s.faceTiltDeg, s.faceYawDeg) };
 }
 
 export function impact(s: Scenario, material: Material = HURRICANE_3_NEO_40): ContactResult {
@@ -98,6 +114,7 @@ export function simulateFlight(start: State, duration = 1.2, dt = 0.002): Flight
   const samples: Sample[] = [{ t: 0, state: start }];
   let state = start;
   let firstBounce: Vec3 | null = null;
+  const bounces: Vec3[] = [];
   for (let i = 1; i <= Math.round(duration / dt); i++) {
     // Midpoint integration is stable enough for the initial visual PoC.
     const a0 = acceleration(state);
@@ -114,11 +131,15 @@ export function simulateFlight(start: State, duration = 1.2, dt = 0.002): Flight
     if (state.position[2] > BALL.radius && next.position[2] <= BALL.radius) {
       const fraction = (state.position[2] - BALL.radius) / (state.position[2] - next.position[2]);
       firstBounce = add(state.position, scale(sub(next.position, state.position), fraction));
-      samples.push({ t: (i - 1 + fraction) * dt, state: { ...next, position: firstBounce } });
-      break;
+      bounces.push(firstBounce);
+      const bounceState: State = { position: firstBounce, velocity: [next.velocity[0], next.velocity[1], Math.abs(next.velocity[2]) * 0.88], spin: scale(next.spin, 0.92) };
+      samples.push({ t: (i - 1 + fraction) * dt, state: bounceState });
+      state = bounceState;
+      if (bounces.length >= 2) break;
+      continue;
     }
     samples.push({ t: i * dt, state: next });
     state = next;
   }
-  return { samples, firstBounce };
+  return { samples, firstBounce, bounces };
 }
